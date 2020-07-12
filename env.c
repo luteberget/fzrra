@@ -40,11 +40,16 @@ static const float PI = 3.1415926535f;
 static float seconds_offset = 0.0f;
 
 static struct ADSREnv envelope = { 
-  .attack = 0.025, 
+  .attack = 0.05, 
   .decay = 0.05, 
   .sustain = 0.0, 
   .release = 0.1, 
   .sustain_level = 0.5  };
+
+float saw(float t) {
+  // periodic at 2*pi
+  return fmodf((-PI + t)/PI, 2*PI);
+}
 
 static void write_callback(struct SoundIoOutStream *outstream,
         int frame_count_min, int frame_count_max)
@@ -74,13 +79,17 @@ static void write_callback(struct SoundIoOutStream *outstream,
         float pitch4 = pitch1 * powf(2, 10/12.0);
         float pitch5 = pitch1 * powf(2, 12/12.0);
         for (int frame = 0; frame < frame_count; frame += 1) {
-            float t = seconds_offset + frame * seconds_per_frame;
+            float t = fmodf(seconds_offset + frame * seconds_per_frame, 1.0f);
+
+	    float base = saw(t*pitch1 / 4.0);
+	     base += saw(t*pitch1 / 2.0);
+
 	    float chord = sinf(t*pitch1) + 
 	                  sinf(t*pitch2) + 
 	                  sinf(t*pitch3) + 
 	                  sinf(t*pitch4) + 
 	                  sinf(t*pitch5);
-            float sample = 0.1 * adsr(&envelope, t) * chord;
+            float sample = 0.1 * adsr(&envelope, t) * chord + 0.1*0.1*base;
             //printf("env at %g -> %g\n", t, adsr(&envelope,t));
             for (int channel = 0; channel < layout->channel_count; channel += 1) {
                 float *ptr = (float*)(areas[channel].ptr + areas[channel].step * frame);
