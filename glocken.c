@@ -53,22 +53,45 @@ float saw(float t) {
   return fmodf((-PI + t) / PI, 2 * PI);
 }
 
+float charpitch(char c) {
+  float a = 440.0f;
+  if(c == 'C') return a * powf(2.0, -21.0 / 12.0);
+  if(c == 'D') return a * powf(2.0, -19.0 / 12.0);
+  if(c == 'E') return a * powf(2.0, -17.0 / 12.0);
+  if(c == 'F') return a * powf(2.0, -16.0 / 12.0);
+  if(c == 'G') return a * powf(2.0, -14.0 / 12.0);
+  if(c == 'A') return a * powf(2.0, -12.0 / 12.0);
+  if(c == 'H') return a * powf(2.0, -10.0 / 12.0);
+  if(c == 'c') return a * powf(2.0, -9.0 / 12.0);
+  if(c == 'd') return a * powf(2.0, -7.0 / 12.0);
+  if(c == 'e') return a * powf(2.0, -5.0 / 12.0);
+  if(c == 'f') return a * powf(2.0, -4.0 / 12.0);
+  if(c == 'g') return a * powf(2.0, -2.0 / 12.0);
+  if(c == 'a') return a * powf(2.0, 0.0 / 12.0);
+  if(c == 'h') return a * powf(2.0, 2.0 / 12.0);
+  if(c == 'x') return a * powf(2.0, 3.0 / 12.0);
+  return -1.0f;
+}
+
+static char prev = '\0';
 float get_sample_at(float t) {
-  float pitch = 440.0f;
-  float pitch1 = pitch * 2.0f * PI;
-  float pitch2 = pitch1 * powf(2, 3 / 12.0);
-  float pitch3 = pitch1 * powf(2, 7 / 12.0);
-  float pitch4 = pitch1 * powf(2, 10 / 12.0);
-  float pitch5 = pitch1 * powf(2, 12 / 12.0);
+  int bpm = 3; 
+  float env = 0.5 * adsr(&envelope, fmod(t,1.0 / (float)bpm));
+  size_t idx = ((int) (t * bpm)) % length;
+  char c = line[idx];
 
-  float base = saw(t * pitch1 / 4.0);
-  base += saw(t * pitch1 / 2.0);
+  if(c != prev) {
+    //printf("pitch %c %g.\n", c, charpitch(c));
+    prev = c;
+  }
 
-  float chord = sinf(t * pitch1) + sinf(t * pitch2) + sinf(t * pitch3) +
-                sinf(t * pitch4) + sinf(t * pitch5);
-  float sample = 0.1 * adsr(&envelope, t) * chord + 0.1 * 0.1 * base;
-
-  return sample;
+  float pitch = charpitch(c);
+  if(pitch > 0) {
+    float signal = sinf(t * pitch * 2 * PI);
+    return env * signal;
+  } else {
+    return 0.0;
+  }
 }
 
 static void write_callback(struct SoundIoOutStream *outstream,
@@ -88,12 +111,15 @@ static void write_callback(struct SoundIoOutStream *outstream,
       fprintf(stderr, "%s\n", soundio_strerror(err));
       exit(1);
     }
+    //printf("frame_count before %d, after %d.\n", frames_left, frame_count);
 
     if (!frame_count)
       break;
 
+    //printf("frame count %d.\n", frame_count);
     for (int frame = 0; frame < frame_count; frame += 1) {
       float t = seconds_offset + frame * seconds_per_frame;
+      //printf("t = %g.\n", t);
       float sample = get_sample_at(t);
       for (int channel = 0; channel < layout->channel_count; channel += 1) {
         float *ptr =
@@ -101,6 +127,7 @@ static void write_callback(struct SoundIoOutStream *outstream,
         *ptr = sample;
       }
     }
+    seconds_offset += frame_count * seconds_per_frame;
 
     if ((err = soundio_outstream_end_write(outstream))) {
       fprintf(stderr, "%s\n", soundio_strerror(err));
@@ -109,6 +136,7 @@ static void write_callback(struct SoundIoOutStream *outstream,
 
     frames_left -= frame_count;
   }
+  //printf("Write callback finished.\n");
 }
 
 int main(int argc, char **argv) {
@@ -139,7 +167,7 @@ int main(int argc, char **argv) {
     return 1;
   }
 
-  fprintf(stderr, "Output device: %s\n", device->name);
+  //fprintf(stderr, "Output device: %s\n", device->name);
 
   struct SoundIoOutStream *outstream = soundio_outstream_create(device);
   outstream->format = SoundIoFormatFloat32NE;
@@ -154,12 +182,8 @@ int main(int argc, char **argv) {
     fprintf(stderr, "unable to set channel layout: %s\n",
             soundio_strerror(outstream->layout_error));
 
-  if ((err = soundio_outstream_start(outstream))) {
-    fprintf(stderr, "unable to start device: %s", soundio_strerror(err));
-    return 1;
-  }
-
   size_t zero = 0;
+  printf("Melodi: ");
   length = getline(&line, &zero, stdin);
   line[length - 1] = '\0';
   length -= 1;
@@ -168,7 +192,13 @@ int main(int argc, char **argv) {
     return 1;
   }
 
-  printf("read %s.\n", line);
+
+  if ((err = soundio_outstream_start(outstream))) {
+    fprintf(stderr, "unable to start device: %s", soundio_strerror(err));
+    return 1;
+  }
+
+  //printf("read %s.\n", line);
 
   for (;;)
     soundio_wait_events(soundio);
