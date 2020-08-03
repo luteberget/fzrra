@@ -82,11 +82,10 @@ float get_sample_at(float t) {
 
   if(relative_t < last_rel_t) { // TRIGGER
     phase = 0.0;
-  } else {
-    last_rel_t = relative_t;
   }
   // TODO this stuff is not sample accurate, some rounding in the fmod relative_time.
   float dt = last_rel_t - relative_t;
+  last_rel_t = relative_t;
 
   float env = 0.5 * adsr(&envelope, relative_t);
   size_t idx = ((int) (t * bpm)) % length;
