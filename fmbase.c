@@ -82,9 +82,11 @@ float get_sample_at(float t) {
 
   if(relative_t < last_rel_t) { // TRIGGER
     phase = 0.0;
+  } else {
+    last_rel_t = relative_t;
   }
+  // TODO this stuff is not sample accurate, some rounding in the fmod relative_time.
   float dt = last_rel_t - relative_t;
-  last_rel_t = relative_t;
 
   float env = 0.5 * adsr(&envelope, relative_t);
   size_t idx = ((int) (t * bpm)) % length;
@@ -98,10 +100,13 @@ float get_sample_at(float t) {
   float pitch = charpitch(c)/4.0;
   if(pitch > 0) {
 
-    float mod_env = 8 * pitch * (1 - relative_t / 0.3) ;
-    if(mod_env < 0.0) mod_env = 0.0;
-    float mod = mod_env * sinf( 2 * PI * 1.0 * pitch * relative_t);
-    phase += 2 * PI * dt * (pitch + mod);
+    float mod1 = 2.0 * pitch * sinf( 2 * PI * 1.0 * pitch * relative_t);
+
+    float mod2_env = 8 * pitch * (1 - relative_t / 0.1) ;
+    if(mod2_env < 0.0) mod2_env = 0.0;
+    float mod2 = mod2_env * sinf( 2 * PI * 5.0 * pitch * relative_t);
+
+    phase += 2 * PI * dt * (pitch + mod1 + mod2);
     phase = fmod(phase, 2 * PI);
 
     float signal = sinf(phase);
