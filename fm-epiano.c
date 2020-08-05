@@ -73,6 +73,106 @@ float charpitch(char c) {
   return -1.0f;
 }
 
+//      | Filename: benson-sysex/rom1a.syx
+//      | Voice #: 11
+//      | Name: E.PIANO 1 
+//      | Algorithm: 5     // 2 -> 1, 4 -> 3, 6* -> 5   (6 has feedback to itself)
+//      | Feedback: 6      // level of feedback (though it is also operator number 6)
+// OFF/*| LFO  
+//      |   Wave: Sine
+//      |   Speed: 34
+//      |   Delay: 33
+//      |   Pitch Mod Depth: 0
+//      |   AM Depth: 0
+//      |   Sync: Off
+//      |   Pitch Modulation Sensitivity: 3
+//    */| Oscillator Key Sync: Off
+// OFF  | Pitch Envelope Generator
+//      |   Rate 1: 94
+//      |   Rate 2: 67
+//      |   Rate 3: 95
+//      |   Rate 4: 60
+//      |   Level 1: 50
+//      |   Level 2: 50
+//      |   Level 3: 50
+//      |   Level 4: 50
+// OFF  | Transpose: C3
+
+float algorithm(float t) {
+  float o2 = operator2(t);
+  float o1 = operator1(t, o2); // o2 modulates o1
+  
+  // ...
+  return o1 + o3 + o5;
+}
+
+// Operator: 1
+//   AM Sensitivity: 0
+//   Oscillator Mode: Frequency (Ratio)
+//   Frequency: 1
+//   Detune: 3
+//   Envelope Generator
+//     Rate 1: 96
+//     Rate 2: 25
+//     Rate 3: 25
+//     Rate 4: 67
+//     Level 1: 99
+//     Level 2: 75
+//     Level 3: 0
+//     Level 4: 0
+//   Keyboard Level Scaling
+//     Breakpoint: A-1
+//     Left Curve: -LIN
+//     Right Curve: -LIN
+//     Left Depth: 0
+//     Right Depth: 0
+//   Keyboard Rate Scaling: 3
+//   Output Level: 99
+//   Key Velocity Sensitivity: 2
+// 
+
+float op1_phase = 0.0;
+float operator1(float dt) {
+  // TODO note pitch input
+  float note_pitch = 440.0f;
+   
+  // basic frequency + fine + detune, 
+  float coarse = 1.0; // 0.5, 1, 2, ..., 31.
+  float fine = 0.0;   // 0.0, 0.99,
+  float detune_level = 3.0;
+  float detune_amount = 7.2 * detune_level; // ??? 
+  float freq = note_pitch * (coarse + fine + detune_amount);
+
+
+  // keyboard level scaling 
+  // is DISABLED on most of the e.piano1 operators  
+
+  // keyboard rate scaling (?) 
+  //  it increases the rate of the envelope based on keyboard midinote.
+  //  (increases "qr" from the envelope function's rate constant)
+  //  see dexed/ dx7voice.cc and env.cc
+  // MIGHT be necessary for e.piano1
+  float rate_scaling = 0.0;
+
+  // amplitude modulation sensitivity is DISABLED on e.piano1
+  //  this is a factor on the the LFO amp.mod. depth
+
+  // key velocity scaling  / key velocity sensitivity
+  //   it increases the constant output amplitude of the envelope based on keyboard velocity.
+
+
+
+  // envelope
+  float env_level = get_level(params, dt, rate_scale);
+
+  // output level
+  float output_level = 1.0;
+  
+  op1_phase += 2 * PI * freq; // no mod on op1
+  return output_level * env_level * sinf(op1_phase);
+}
+
+
 static char prev = '\0';
 float last_rel_t = 0.0;
 float phase = 0.0;

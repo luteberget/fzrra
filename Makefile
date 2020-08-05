@@ -1,7 +1,9 @@
 
-
 brass: brass.c
 	gcc -o brass brass.c -lsoundio -lpulse -pthread -lm
+
+fm-ex1: fm-ex1.c
+	gcc -o fm-ex1 fm-ex1.c libsoundio.a -I. -lpulse -pthread -lm
 
 fmbase: fmbase.c
 	gcc -o fmbase fmbase.c -lsoundio -lpulse -pthread -lm
