@@ -1,6 +1,9 @@
 
+fm-epiano: fm-epiano.c
+	gcc -Wall -o fm-epiano fm-epiano.c libsoundio.a -I. -lpulse -pthread -lm
+
 brass: brass.c
-	gcc -o brass brass.c -lsoundio -lpulse -pthread -lm
+	gcc -o brass brass.c -I. libsoundio.a -lpulse -pthread -lm
 
 fm-ex1: fm-ex1.c
 	gcc -o fm-ex1 fm-ex1.c libsoundio.a -I. -lpulse -pthread -lm
@@ -9,7 +12,7 @@ fmbase: fmbase.c
 	gcc -o fmbase fmbase.c -lsoundio -lpulse -pthread -lm
 
 fm: fm.c
-	gcc -o fm fm.c -lsoundio -lpulse -pthread -lm
+	gcc -o fm fm.c libsoundio.a -I. -lpulse -pthread -lm
 
 glocken: glocken.c
 	gcc -o glocken glocken.c -lsoundio -lpulse -pthread -lm

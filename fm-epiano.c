@@ -5,73 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-struct ADSREnv {
-  float attack;
-  float decay;
-  float sustain;
-  float release;
-  float sustain_level;
-};
-
-float adsr(struct ADSREnv *env, float offset) {
-  if (offset <= env->attack) {
-    return offset / env->attack;
-  }
-  offset -= env->attack;
-
-  if (offset <= env->decay) {
-    return env->sustain_level +
-           (1 - env->sustain_level) * (1 - offset / env->decay);
-  }
-  offset -= env->decay;
-
-  if (offset <= env->sustain) {
-    return env->sustain_level;
-  }
-  offset -= env->sustain;
-
-  if (offset <= env->release) {
-    return env->sustain_level * (1 - offset / env->release);
-  }
-
-  return 0.0;
-}
-
 static const float PI = 3.1415926535f;
-static float seconds_offset = 0.0f;
-static char *line = NULL;
-static ssize_t length = 0;
-
-static struct ADSREnv envelope = {.attack = 0.001,
-                                  .decay = 0.05,
-                                  .sustain = 0.2,
-                                  .release = 0.05,
-                                  .sustain_level = 0.5};
-
-float saw(float t) {
-  // periodic at 2*pi
-  return fmodf((-PI + t) / PI, 2 * PI);
-}
-
-float charpitch(char c) {
-  float a = 440.0f;
-  if(c == 'C') return a * powf(2.0, -21.0 / 12.0);
-  if(c == 'D') return a * powf(2.0, -19.0 / 12.0);
-  if(c == 'E') return a * powf(2.0, -17.0 / 12.0);
-  if(c == 'F') return a * powf(2.0, -16.0 / 12.0);
-  if(c == 'G') return a * powf(2.0, -14.0 / 12.0);
-  if(c == 'A') return a * powf(2.0, -12.0 / 12.0);
-  if(c == 'H') return a * powf(2.0, -10.0 / 12.0);
-  if(c == 'c') return a * powf(2.0, -9.0 / 12.0);
-  if(c == 'd') return a * powf(2.0, -7.0 / 12.0);
-  if(c == 'e') return a * powf(2.0, -6.0 / 12.0);
-  if(c == 'f') return a * powf(2.0, -4.0 / 12.0);
-  if(c == 'g') return a * powf(2.0, -2.0 / 12.0);
-  if(c == 'a') return a * powf(2.0, 0.0 / 12.0);
-  if(c == 'h') return a * powf(2.0, 2.0 / 12.0);
-  if(c == 'x') return a * powf(2.0, 3.0 / 12.0);
-  return -1.0f;
-}
 
 //      | Filename: benson-sysex/rom1a.syx
 //      | Voice #: 11
@@ -98,14 +32,6 @@ float charpitch(char c) {
 //      |   Level 4: 50
 // OFF  | Transpose: C3
 
-float algorithm(float t) {
-  float o2 = operator2(t);
-  float o1 = operator1(t, o2); // o2 modulates o1
-  
-  // ...
-  return o1 + o3 + o5;
-}
-
 // Operator: 1
 //   AM Sensitivity: 0
 //   Oscillator Mode: Frequency (Ratio)
@@ -131,89 +57,187 @@ float algorithm(float t) {
 //   Key Velocity Sensitivity: 2
 // 
 
-float op1_phase = 0.0;
-float operator1(float dt) {
-  // TODO note pitch input
-  float note_pitch = 440.0f;
-   
-  // basic frequency + fine + detune, 
-  float coarse = 1.0; // 0.5, 1, 2, ..., 31.
-  float fine = 0.0;   // 0.0, 0.99,
-  float detune_level = 3.0;
-  float detune_amount = 7.2 * detune_level; // ??? 
-  float freq = note_pitch * (coarse + fine + detune_amount);
+//float op1_phase = 0.0;
+//float operator1(float dt) {
+//  // TODO note pitch input
+//  float note_pitch = 440.0f;
+//   
+//  // basic frequency + fine + detune, 
+//  float coarse = 1.0; // 0.5, 1, 2, ..., 31.
+//  float fine = 0.0;   // 0.0, 0.99,
+//  float detune_level = 3.0;
+//  float detune_amount = 7.2 * detune_level; // ??? 
+//  float freq = note_pitch * (coarse + fine + detune_amount);
+//
+//
+//  // keyboard level scaling 
+//  // is DISABLED on most of the e.piano1 operators  
+//
+//  // keyboard rate scaling (?) 
+//  //  it increases the rate of the envelope based on keyboard midinote.
+//  //  (increases "qr" from the envelope function's rate constant)
+//  //  see dexed/ dx7voice.cc and env.cc
+//  // MIGHT be necessary for e.piano1
+//  float rate_scaling = 0.0;
+//
+//  // amplitude modulation sensitivity is DISABLED on e.piano1
+//  //  this is a factor on the the LFO amp.mod. depth
+//
+//  // key velocity scaling  / key velocity sensitivity
+//  //   it increases the constant output amplitude of the envelope based on keyboard velocity.
+//
+//
+//
+//  // envelope
+//  float env_level = get_level(params, dt, rate_scale);
+//
+//  // output level
+//  float output_level = 1.0;
+//  
+//  op1_phase += 2 * PI * freq; // no mod on op1
+//  return output_level * env_level * sinf(op1_phase);
+//}
 
+float clamp(float x) { return fmin(1.0, fmax(0.0, x)); }
+float dbamp(float db) { return powf(10., db * .05f); }
+float level_to_amp(float level) { return level > 0 ? dbamp(-90.65*(1 - level)) : 0; }
 
-  // keyboard level scaling 
-  // is DISABLED on most of the e.piano1 operators  
+typedef struct { float levels[4]; float rates[4]; int stage; float level; bool is_released; } envelope;
+typedef struct { float freq; float amp; envelope amp_env; float phase; } operator;
+typedef struct { operator ops[6]; float timestep; float feedback_amp; float feedback_buf; } voice;
 
-  // keyboard rate scaling (?) 
-  //  it increases the rate of the envelope based on keyboard midinote.
-  //  (increases "qr" from the envelope function's rate constant)
-  //  see dexed/ dx7voice.cc and env.cc
-  // MIGHT be necessary for e.piano1
-  float rate_scaling = 0.0;
+//float velocity_sensitivity(float sensitivity, float velocity) {
+//  // velocity in [0,1], sensitivity in [0,1].
+//
+//  // rescale and use approximation of velocity_data table from dexed
+//  float clamped_vel = velocity * 127.0;
+//  float vel_value = 60.0 * log((clamped_vel/2.0)+1) - 239.0;
+//  float scaled_vel = (sensitivity * 7 + 1) * vel_value * 2;
+//  // TODO simplify
+//  return scaled_vel / 128.0 / 32.0;
+//}
 
-  // amplitude modulation sensitivity is DISABLED on e.piano1
-  //  this is a factor on the the LFO amp.mod. depth
-
-  // key velocity scaling  / key velocity sensitivity
-  //   it increases the constant output amplitude of the envelope based on keyboard velocity.
-
-
-
-  // envelope
-  float env_level = get_level(params, dt, rate_scale);
-
-  // output level
-  float output_level = 1.0;
-  
-  op1_phase += 2 * PI * freq; // no mod on op1
-  return output_level * env_level * sinf(op1_phase);
+float velocity_sensitivity(float sens, float vel) {
+  return (sens + 1.0/7.0) * (log((vel * 64.0) + 1.0) - 239.0 / 64.0) / 4.0;
 }
 
-
-static char prev = '\0';
-float last_rel_t = 0.0;
-float phase = 0.0;
-float get_sample_at(float t) {
-  int bpm = 2; 
-  float relative_t = fmod(t, 1.0 / (float)bpm);
-
-  if(relative_t < last_rel_t) { // TRIGGER
-    phase = 0.0;
+bool outed = false;
+void envelope_advance(float dt, envelope* env) {
+  if(env->stage >= 3 && !env->is_released) { /*printf("sustain\n");*/ return; } // sustaining, no change in level.
+  bool is_attack = env->levels[(env->stage + 3)%4] < env->levels[env->stage];
+  if (env->stage < 3 && ((env->level <= env->levels[env->stage]) ^ is_attack || env->level == env->levels[env->stage])) { 
+    env->stage = (env->stage + 1) % 4;
+    if(!outed && env->stage == 2) { printf("stage 2\n"); outed = true; }
+    return envelope_advance(dt, env); 
   }
-  // TODO this stuff is not sample accurate, some rounding in the fmod relative_time.
-  float dt = last_rel_t - relative_t;
-  last_rel_t = relative_t;
+  float const_rate = dt *  0.28 / 90.65 * powf(2.0f, 16.0f * env->rates[env->stage]);
+  float rate = const_rate * (is_attack ? (17.0 - 16.0*(3840.0/4096.0)*env->level) : -1.0);
+  //printf("attacK %d, const_rate=%g, rate=%g\n", is_attack, const_rate, rate);
+  env->level += rate;
+  if((env->level <= env->levels[env->stage]) ^is_attack) env->level = env->levels[env->stage];
+}
 
-  float env = 0.5 * adsr(&envelope, relative_t);
-  size_t idx = ((int) (t * bpm)) % length;
-  char c = line[idx];
+voice new_note_voice(float timestep, int midinote /* [midi] */, float velocity /* [[0,1]] */) {
+  float freq = 440.0f / 32.0f * powf(2, (((float)(midinote - 9)) / 12.0f));
+  printf("frequency %g\n", freq);
+  voice v = { .timestep = timestep, .feedback_amp = 6.0f/7.0f, .feedback_buf = 0.0, .ops = {
 
-  if(c != prev) {
-    //printf("pitch %c %g.\n", c, charpitch(c));
-    prev = c;
-  }
+    // TODO patch: the whole LFO thing
+    // TODO patch: pitch envelope
 
-  float pitch = charpitch(c)/8.0;
-  if(pitch > 0) {
+    // TODO operator: AM sensitivity (factor for adding LFO amplitude depth to operator amp)
+    // TODO operator: keyboard level scaling (add amplitude based on midinote)
+    // TODO operator: keyboard rate scaling (modify frequency based on midinote)
 
-    float mod1 = 2.0 * pitch * sinf( 2 * PI * 1.0 * pitch * relative_t);
+    // OP 0 "pling"
+    //{ .freq = 1.00f * freq + 3.0f*7.2f /* (1 + 3*detuned) */ /* [Hz] */ , 
+    { .freq = 1.00f *freq + 3.0f / 32.0 /* (1 + 3*detuned) */ /* [Hz] */ , 
+      .amp =  level_to_amp( clamp(1.0 + /* keyboard sensitivity: */ velocity_sensitivity(2.0/7.0, velocity))),
+      .amp_env = { .levels = { 1.0, 0.75, 0.0, 0.0 }, .rates = { 0.96, 0.25, 0.25, 0.67 } } },
+    // OP 1 [modulates->0]
+    { .freq = 14.0f * freq, 
+       .amp =  level_to_amp( clamp (0.78 + velocity_sensitivity(1.0, velocity))),
+      .amp_env = { .levels = { 1.0, 0.75, 0.0, 0.0 }, .rates = { 0.95, 0.50, 0.35, 0.78 } } },
 
-    float mod2_env = 8 * pitch * (1 - relative_t / 0.1) ;
-    if(mod2_env < 0.0) mod2_env = 0.0;
-    float mod2 = mod2_env * sinf( 2 * PI * 5.0 * pitch * relative_t);
+    // OP 2
+    { .freq = 1.0 * freq,
+      .amp =  level_to_amp( clamp(1.0 + /* keyboard sensitivity: */ velocity_sensitivity(2.0 / 7.0, velocity))),
+      .amp_env = { .levels = { 1.0, 0.95, 0.0, 0.0 }, .rates = { 0.95, 0.2, 0.2, 0.5 } } },
+    // OP 3 [modulates->2]
+    { .freq = 1.00f * freq /* (1 + 3*detuned) */ /* [Hz] */ , 
+      .amp =  level_to_amp( clamp(0.79 + /* keyboard sensitivity: */ velocity_sensitivity(6.0/7.0, velocity))),
+      .amp_env = { .levels = { 1.0, 0.95, 0.0, 0.0 }, .rates = { 0.95, 0.29, 0.20, 0.50 } } },
 
-    phase += 2 * PI * dt * (pitch + mod1 + mod2);
-    phase = fmod(phase, 2 * PI);
+    // OP 4
+    { .freq = 1.00f * freq + -0.0/5.0,
+      .amp =  level_to_amp( clamp(1.0 + /* keyboard sensitivity: */ velocity_sensitivity(0.0, velocity))),
+      .amp_env = { .levels = { 1.0, 0.95, 0.0, 0.0 }, .rates = { 0.95, 0.20, 0.20, 0.50 } } },
+    // OP 5
+    { .freq = 1.00f * freq + 0.0/5.0 /* (1 + 3*detuned) */ /* [Hz] */ , 
+      .amp =  level_to_amp( clamp(0.69 + /* keyboard sensitivity: */ velocity_sensitivity(6.0/7.0, velocity))),
+      .amp_env = { .levels = { 0.99, 0.95, 0.0, 0.0 }, .rates = { 0.95, 0.29, 0.20, 0.50 } } },
+    }};
+  return v;
+}
 
-    float signal = sinf(phase);
-    return env * signal;
-  } else {
-    return 0.0;
+int ni = 0;
+float voice_sample(voice* v) {
+//printf("getting sample %d\n", ni++);
+  // sample each operator
+  float out[6];
+
+  double feedback_scaling = 6.4;
+
+  for(int i = 0; i < 5; i++) out[i] = v->ops[i].amp * level_to_amp(v->ops[i].amp_env.level) * sinf(v->ops[i].phase);
+
+  out[5] = v->ops[5].amp * level_to_amp(v->ops[5].amp_env.level) * sinf(v->ops[5].phase + feedback_scaling * v->feedback_buf);
+  v->feedback_buf = out[5];
+printf("amp=%g\tleevel=%g\tphase=%g,freq=%g,sample=%g\n", v->ops[5].amp, v->ops[5].amp_env.level, v->ops[5].phase, v->ops[5].freq,out[5]);
+
+
+//printf(" sinf ops[0]: %g,  v.ops[0].amp_env.level: %g \n", sinf(v->ops[0].phase), v->ops[0].amp_env.level);
+//printf(" sinf ops[1]: %g,  v.ops[1].amp_env.level: %g \n", sinf(v->ops[1].phase), v->ops[1].amp_env.level);
+
+//for(int sens_i = 0; sens_i <= 10; sens_i++) {
+//for(int vel_i = 0; vel_i <= 10; vel_i++) {
+//  float vel = (float)vel_i / 10.0;
+//  float sens = (float)sens_i / 10.0;
+//  float delta = velocity_sensitivity(sens,vel) - velocity_sensitivity_simplified(sens,vel);
+//  printf("velocity_sensitivity(%g,%g)=%g  delta=%g\n", sens, vel, velocity_sensitivity(sens, vel));
+//}
+//}
+
+  //double feedback_scaling = 6.0/7.0 / (2 * PI) *0.18 / 99.0 * 50;
+
+  // run the algorithm (advancing oscillators in preparation for next sample)
+  v->ops[0].phase += 2 * PI * v->timestep * v->ops[0].freq + out[1];// + 0.01*out[1];
+  v->ops[1].phase += 2 * PI * v->timestep * v->ops[1].freq;
+  v->ops[2].phase += 2 * PI * v->timestep * v->ops[2].freq + out[3] /* modulation */;
+  v->ops[3].phase += 2 * PI * v->timestep * v->ops[3].freq;
+  v->ops[4].phase += 2 * PI * v->timestep * v->ops[4].freq + out[5]; //+ out[5] /* modulation */);
+  v->ops[5].phase += 2 * PI * v->timestep * v->ops[5].freq;// + feedback_scaling*out[5] /* feedback */;
+
+  // clamp phase angles in [0,2pi]
+  for(int i = 0; i < 6; i++) while(v->ops[i].phase > 2*PI) v->ops[i].phase -= 2*PI;
+
+  // advance the amplitude envelope generators
+  for(int i = 0; i < 6; i++) envelope_advance(v->timestep, &v->ops[i].amp_env);
+
+//printf("0 amp: %g\n", v->ops[0].amp);
+  // return the mixed sample
+  return (out[4] + out[4])/2.0; ;// / (v->ops[0].amp + v->ops[2].amp) ;
+  //return ( out[0] + out[2] + out[4] ) / 3.0f /* normalize amplitude for 3 carriers */;
+}
+
+void release_note(voice* v) {
+  for(int i = 0; i < 6; i++) {
+    v->ops[i].amp_env.is_released = true;
+    v->ops[i].amp_env.stage = 3;
   }
 }
+
+voice the_voice;
+bool inited = false;
 
 static void write_callback(struct SoundIoOutStream *outstream,
                            int frame_count_min, int frame_count_max) {
@@ -224,6 +248,11 @@ static void write_callback(struct SoundIoOutStream *outstream,
   int frames_left = frame_count_max;
   int err;
 
+  if(!inited) {
+    the_voice = new_note_voice(seconds_per_frame, 64, 0.99);
+    inited = true;
+  }
+
   while (frames_left > 0) {
     int frame_count = frames_left;
 
@@ -232,23 +261,19 @@ static void write_callback(struct SoundIoOutStream *outstream,
       fprintf(stderr, "%s\n", soundio_strerror(err));
       exit(1);
     }
-    //printf("frame_count before %d, after %d.\n", frames_left, frame_count);
 
     if (!frame_count)
       break;
 
-    //printf("frame count %d.\n", frame_count);
     for (int frame = 0; frame < frame_count; frame += 1) {
-      float t = seconds_offset + frame * seconds_per_frame;
-      //printf("t = %g.\n", t);
-      float sample = get_sample_at(t);
+      float sample = voice_sample(&the_voice);
+      //printf("final sample: %g\n", sample);
       for (int channel = 0; channel < layout->channel_count; channel += 1) {
         float *ptr =
             (float *)(areas[channel].ptr + areas[channel].step * frame);
         *ptr = sample;
       }
     }
-    seconds_offset += frame_count * seconds_per_frame;
 
     if ((err = soundio_outstream_end_write(outstream))) {
       fprintf(stderr, "%s\n", soundio_strerror(err));
@@ -257,7 +282,6 @@ static void write_callback(struct SoundIoOutStream *outstream,
 
     frames_left -= frame_count;
   }
-  //printf("Write callback finished.\n");
 }
 
 int main(int argc, char **argv) {
@@ -267,65 +291,38 @@ int main(int argc, char **argv) {
     fprintf(stderr, "out of memory\n");
     return 1;
   }
-
   if ((err = soundio_connect(soundio))) {
     fprintf(stderr, "error connecting: %s", soundio_strerror(err));
     return 1;
   }
-
   soundio_flush_events(soundio);
-
   int default_out_device_index = soundio_default_output_device_index(soundio);
   if (default_out_device_index < 0) {
     fprintf(stderr, "no output device found");
     return 1;
   }
-
   struct SoundIoDevice *device =
       soundio_get_output_device(soundio, default_out_device_index);
   if (!device) {
     fprintf(stderr, "out of memory");
     return 1;
   }
-
-  //fprintf(stderr, "Output device: %s\n", device->name);
-
   struct SoundIoOutStream *outstream = soundio_outstream_create(device);
   outstream->format = SoundIoFormatFloat32NE;
   outstream->write_callback = write_callback;
-
   if ((err = soundio_outstream_open(outstream))) {
     fprintf(stderr, "unable to open device: %s", soundio_strerror(err));
     return 1;
   }
-
   if (outstream->layout_error)
     fprintf(stderr, "unable to set channel layout: %s\n",
             soundio_strerror(outstream->layout_error));
-
-  //size_t zero = 0;
-  //printf("Melodi: ");
-  //length = getline(&line, &zero, stdin);
-  //line[length - 1] = '\0';
-  //length -= 1;
-  //if (length == -1) {
-  //  fprintf(stderr, "unable to read input.\n");
-  //  return 1;
-  //}
-  line = "cccceeddccccggddccccGGAH";
-  length = 24;
-
-
   if ((err = soundio_outstream_start(outstream))) {
     fprintf(stderr, "unable to start device: %s", soundio_strerror(err));
     return 1;
   }
-
-  //printf("read %s.\n", line);
-
   for (;;)
     soundio_wait_events(soundio);
-
   soundio_outstream_destroy(outstream);
   soundio_device_unref(device);
   soundio_destroy(soundio);
