@@ -1,5 +1,7 @@
+#include "rtmidi_c.h"
 #include <soundio/soundio.h>
 
+#include <stdio.h>
 #include <math.h>
 #include <stdio.h>
 #include <unistd.h>
@@ -12,13 +14,15 @@ static float phase = 0.0f;
 static float modphase = 0.0;
 static float modvalue = 0.0;
 static float basefreq = 330.0;
-static float modfreq = 1.50 * 330.0;
+static float curr_basefreq = 330.0;
+
+static float relative_mod = 1.0;
 
 float saw(float t) { return -1.0 + 2.0 * fmodf(t / M_PI, 2 * M_PI); }
 
 static void write_callback(struct SoundIoOutStream *outstream,
                            int frame_count_min, int frame_count_max) {
-	printf("Please write %d -- %d frame_count\n", frame_count_min, frame_count_max);
+	//printf("Please write %d -- %d frame_count\n", frame_count_min, frame_count_max);
   const struct SoundIoChannelLayout *layout = &outstream->layout;
   float float_sample_rate = outstream->sample_rate;
   float seconds_per_frame = 1.0f / float_sample_rate;
@@ -50,11 +54,13 @@ static void write_callback(struct SoundIoOutStream *outstream,
 
       // long double t = seconds_offset + frame * seconds_per_frame;
 
-      modphase += 2 * M_PI * seconds_per_frame * modfreq;
+      curr_basefreq += (basefreq - curr_basefreq)*0.001;
+
+      modphase += 2 * M_PI * seconds_per_frame * relative_mod*curr_basefreq;
       modphase = fmodf(modphase, 2 * M_PI);
       modvalue = sinf(modphase);
 
-      phase += 2 * M_PI * basefreq * seconds_per_frame;
+      phase += 2 * M_PI * curr_basefreq * seconds_per_frame;
       phase = fmodf(phase, 2 * M_PI);
 
       float sample = 0.4 * sinf(phase + modvalue);
@@ -75,6 +81,48 @@ static void write_callback(struct SoundIoOutStream *outstream,
 
     frames_left -= frame_count;
   }
+}
+
+void midi_msg_in_cb(double timestamp, const unsigned char* message, size_t message_size, void* user_data) {
+
+
+	if (message_size  == 3) {
+		if (message[0] == 144) {
+			// NOTE ON
+			char note = message[1];
+			char velocity = message[2];
+			printf(" NOTEON note %d vel %d \n", note, velocity);
+
+			float frequency = powf(2.0, (note - 69.0)/12.0)*440.0;
+			basefreq = frequency;
+
+
+		}
+		else if (message[0] == 128) {
+			// NOTE OFF
+			char note = message[1];
+			char velocity = message[2];
+			printf(" NOTEOFF note %d vel %d \n", note, velocity);
+		}
+		else if (message[0] == 176) {
+			// KNOB
+			char note = message[1];
+			char velocity = message[2];
+			printf(" KNOB note %d vel %d \n", note, velocity);
+
+			relative_mod = ((float)velocity / 127.0) * 3.0 + 0.5;
+
+
+		} else {
+			printf("Unknown midi msg");
+			for(int i = 0; i < message_size; i++) {
+				printf(" %d ", message[i]);
+			}
+			printf("\n");
+		}
+	} else {
+			printf("Unknown midi msg.\n");
+	}
 }
 
 int main(int argc, char **argv) {
@@ -110,8 +158,8 @@ int main(int argc, char **argv) {
   struct SoundIoOutStream *outstream = soundio_outstream_create(device);
   outstream->format = SoundIoFormatFloat32NE;
   outstream->write_callback = write_callback;
-  //printf("Default software latency %g\n", outstream->software_latency);
-  //outstream->software_latency = 0.1;
+  printf("Default software latency %g\n", outstream->software_latency);
+  outstream->software_latency = 0.001;
 
   if ((err = soundio_outstream_open(outstream))) {
     fprintf(stderr, "unable to open device: %s", soundio_strerror(err));
@@ -127,6 +175,26 @@ int main(int argc, char **argv) {
     fprintf(stderr, "unable to start device: %s", soundio_strerror(err));
     return 1;
   }
+
+
+  // INIT MIDI
+    struct RtMidiWrapper *midiin = rtmidi_in_create_default();
+
+    ////unsigned char buf[1024];
+    ////int buf_len = sizeof(buf);
+    ////unsigned int ports = rtmidi_get_port_count(midiin);
+    ////printf("port count: %d\n", ports);
+    ////for(int i = 0; i < ports; i++) {
+    ////        rtmidi_get_port_name(midiin, i, buf, &buf_len);
+    ////        printf("name: %s\n", buf);
+    ////}
+
+    ////printf("Opening 2\n");
+
+    rtmidi_open_port(midiin, 2, "midi2osc");
+    rtmidi_in_set_callback(midiin, &midi_msg_in_cb, NULL); 
+
+
 
   char buffer[256];
   for (;;) {
@@ -147,7 +215,6 @@ int main(int argc, char **argv) {
       int n = read(0, buffer, sizeof(buffer));
       int i = 0;
       basefreq = strtof(buffer, NULL);
-      modfreq = 1.5*basefreq;
       printf("Setting basefreq\n");
 
       //printf("Clear: %d\n", soundio_outstream_clear_buffer(outstream));
@@ -158,5 +225,8 @@ int main(int argc, char **argv) {
   soundio_outstream_destroy(outstream);
   soundio_device_unref(device);
   soundio_destroy(soundio);
-  return 0;
+    rtmidi_in_free(midiin);
 }
+
+
+

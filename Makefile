@@ -12,7 +12,7 @@ fmbase: fmbase.c
 	gcc -o fmbase fmbase.c -lsoundio -lpulse -pthread -lm
 
 fm: fm.c
-	gcc -o fm fm.c libsoundio.a -I. -lpulse -pthread -lm
+	gcc -o fm fm.c libsoundio.a librtmidi.a -I. -lpulse -pthread -lm -lstdc++ -lasound
 
 glocken: glocken.c
 	gcc -o glocken glocken.c -lsoundio -lpulse -pthread -lm
